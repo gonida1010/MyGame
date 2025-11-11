@@ -38,15 +38,27 @@ class Player(pygame.sprite.Sprite):
         self.angle = 45  # 초기 발사 각도
         self.facing_right = True
 
+        # 넉백 기능 추가하기=> 중력을 위한 속도 변수 추가
+        self.vel_x = 0.0
+        self.vel_y = 0.0
+
     def update(self, terrain):
-        # 중력 적용 (간단화된 버전)
-        if not self.is_on_ground(terrain):
-            self.rect.y += TILE_SIZE // 2
+        # 넉백/관성으로 인한 x축 이동
+        self.rect.x += int(self.vel_x)
+
+        # x축 마찰력
+        self.vel_x *= 0.9  # 매 프레임 속도 10% 감소
+        if abs(self.vel_x) < 0.5:
+            self.vel_x = 0
+
+        # Y축 중력/속도 적용
+        self.vel_y += GRAVITY
+        self.rect.y += int(self.vel_y)
         
         # 바닥에 붙어있도록 조정
         while self.is_on_ground(terrain):
             self.rect.y -= 1
-        self.rect.y += 1 # 다시 한 칸 내리기
+            self.vel_y = 0  # 땅에 닿았으니 수직 속도를 리셋하기
 
     def is_on_ground(self, terrain):
         # 플레이어가 땅에 있는지 확인하기
@@ -78,6 +90,12 @@ class Player(pygame.sprite.Sprite):
         end_x = self.rect.centerx + length * math.cos(angle_rad)
         end_y = self.rect.centery - length * math.sin(angle_rad)
         pygame.draw.line(surface, self.color, self.rect.center, (end_x, end_y), 3)
+
+    # 넉백 함수 추가하기(x,y 방향의 힘을 받도록 설정)
+    def apply_knockback(self, kx, ky):
+        self.vel_x += kx
+        self.vel_y += ky
+
 
 # 지형 클래스 만들기
 class Terrain:
@@ -134,7 +152,7 @@ class Projectile(pygame.sprite.Sprite):
         self.particles = [] # 궤적용
         self.hit = False
 
-    def update(self, terrain):
+    def update(self, terrain, players):
         if not self.hit:
             self.vel_y += GRAVITY
             self.x += self.vel_x
@@ -152,14 +170,14 @@ class Projectile(pygame.sprite.Sprite):
             if 0 <= tile_x < MAP_WIDTH and 0 <= tile_y < MAP_HEIGHT:
                 if terrain.tiles[tile_y][tile_x] == 1:
                     self.hit = True
-                    self.explode(terrain)
+                    self.explode(terrain, players)
 
             # 화면 밖으로 나감 (낙사 아님, 그냥 소멸)
             if not (0 <= self.rect.centerx <= SCREEN_WIDTH and 0 <= self.rect.centery <= SCREEN_HEIGHT * 2):
                 self.kill() # 스프라이트 그룹에서 제거
 
     # 지형 파괴 속성 함수 만들기
-    def explode(self, terrain):
+    def explode(self, terrain, players):
         radius = 30 # 기본 반경
         
         # 캐릭터 2 (광역 폭발)
@@ -181,7 +199,38 @@ class Projectile(pygame.sprite.Sprite):
             # 기본 1발
             terrain.destroy_terrain(self.rect.centerx, self.rect.centery, radius)
         
-        # TODO: 폭발 시 플레이어 넉백(밀어내기) 로직 추가
+        # --- (넉백 로직 추가) ---
+        knockback_radius = radius * 2.5  # 넉백 범위는 지형 파괴보다 넓게
+        max_knockback_force = 2         # 최대 넉백 힘
+        
+        explosion_x, explosion_y = self.rect.center
+
+        for player in players:
+            # 1. 플레이어와 폭발 중심 사이의 거리 계산
+            dist_x = player.rect.centerx - explosion_x
+            dist_y = player.rect.centery - explosion_y
+            distance = math.sqrt(dist_x**2 + dist_y**2)
+
+            # 2. 넉백 범위 내에 있는지 확인 (0보다 커야 함)
+            if 0 < distance < knockback_radius:
+                # 3. 넉백 힘 계산 (거리에 반비례)
+                force_magnitude = max_knockback_force * (1 - (distance / knockback_radius))
+                
+                # 4. 넉백 방향 (폭발 중심에서 플레이어 방향)
+                knock_x = (dist_x / distance) * force_magnitude
+                knock_y = (dist_y / distance) * force_magnitude
+                
+                # 5. (게임성 보정) Y축 넉백은 항상 위로 띄우기
+                #    (아래로 박히는 넉백은 불쾌한 경험을 줄 수 있음)
+                if knock_y > 0: # 아래로 향하는 넉백이라면
+                    knock_y = -knock_y * 0.2 # 방향을 바꿔 약하게 위로 띄움
+                
+                # 6. (게임성 보정) 최소한의 수직 넉백을 보장 (위로 붕 뜨는 느낌)
+                knock_y -= force_magnitude * 0.3
+
+                # 7. 플레이어에게 넉백 적용
+                player.apply_knockback(knock_x, knock_y)
+        # --- (넉백 로직 끝) ---
         
         self.kill() # 충돌 후 제거
 
@@ -319,7 +368,7 @@ class Game:
 
         # 공통 업데이트
         self.players.update(self.terrain)
-        self.projectiles.update(self.terrain)
+        self.projectiles.update(self.terrain, self.players)
         
         # 낙사(승리) 조건 확인
         for player in self.player_list:
