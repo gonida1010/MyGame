@@ -8,10 +8,10 @@ import random
 SCREEN_WIDTH = 1280  
 SCREEN_HEIGHT = 720  
 FPS = 60
-GRAVITY = 0.1  # 중력세기 테스트중
-PROJECTILE_VELOCITY = 8  # 발사 세기 (고정)
+GRAVITY = 0.15  # 중력세기 테스트중
+PROJECTILE_VELOCITY = 10  # 발사 세기 (고정)
 
-# 임시 색상 설정
+# 색상 설정
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 RED = (255, 50, 50)
@@ -20,6 +20,11 @@ GREEN = (50, 255, 50)
 YELLOW = (255, 255, 0)
 GRAY = (100, 100, 100)
 SKY_BLUE = (135, 206, 235)
+# 색깔 추가
+EARTH_GREEN = (85, 107, 47)  # 평원 (흙/잔디색)
+SNOW_WHITE = (245, 245, 245) # 설원 (하얀색)
+ROCK_GRAY_DARK = (112, 128, 144) # 구룽지 (어두운 바위색)
+ROCK_GRAY_LIGHT = (169, 169, 169) # 구룽지 (밝은 바위색)
 
 # 타일 설정
 TILE_SIZE = 5  # 맵 타일 크기
@@ -30,18 +35,27 @@ MAP_HEIGHT = SCREEN_HEIGHT // TILE_SIZE
 class Player(pygame.sprite.Sprite):
     def __init__(self, x, y, color, controls, char_type=1):
         super().__init__()
+
+        size_red = (TILE_SIZE * 19, TILE_SIZE * 19)   # 예: (40, 40)
+        size_blue = (TILE_SIZE * 11, TILE_SIZE * 11) # 예: (50, 50) - 파란색은 더 크게
+        size_green = (TILE_SIZE * 20, TILE_SIZE * 20)  # 예: (40, 40)
+        size_default = (TILE_SIZE * 10, TILE_SIZE * 10) # 기본 사각형
+
         if char_type == 1:
             self.image = pygame.image.load('./images/red.png').convert_alpha()
+            self.image = pygame.transform.scale(self.image, size_red)
         elif char_type == 2:
             self.image = pygame.image.load('./images/blue.png').convert_alpha()
+            self.image = pygame.transform.scale(self.image, size_blue)
         elif char_type == 3:
             self.image = pygame.image.load('./images/green.png').convert_alpha()
+            self.image = pygame.transform.scale(self.image, size_green)
         else:  # (기본값) 또는 선택 오류 시 기본 픽셀로 된 이미지
-            self.image = pygame.Surface((TILE_SIZE * 4, TILE_SIZE * 4))
+            self.image = pygame.Surface(size_default)
             self.image.fill(color)
 
-        # 이미지를 먼저 원하는 크기로 조절합니다.
-        self.image = pygame.transform.scale(self.image, (TILE_SIZE * 8, TILE_SIZE * 8))
+        self.image_right = self.image
+        self.image_left = pygame.transform.flip(self.image_right, True, False)
 
         self.rect = self.image.get_rect(center=(x, y))
 
@@ -52,11 +66,11 @@ class Player(pygame.sprite.Sprite):
         self.facing_right = True
 
         if self.char_type == 1:
-            self.y_offset = -12  # 빨간색 캐릭터의 발 위치 오프셋
+            self.y_offset = -29  # 빨간색 캐릭터의 발 위치 오프셋
         elif self.char_type == 2:
-            self.y_offset = -2  # 파란색 캐릭터의 발 위치 오프셋
+            self.y_offset = -5  # 파란색 캐릭터의 발 위치 오프셋
         elif self.char_type == 3:
-            self.y_offset = 10  # 초록색 캐릭터의 발 위치 오프셋
+            self.y_offset = -27  # 초록색 캐릭터의 발 위치 오프셋
         else:
             self.y_offset = 0   # 기본 사각형 캐릭터의 오프셋
 
@@ -99,12 +113,16 @@ class Player(pygame.sprite.Sprite):
         # 화면 밖으로 나가지 않도록 입력하기
         if 0 <= new_x and new_x + self.rect.width <= SCREEN_WIDTH:
             self.rect.x = new_x
+
             if dx > 0:
                 self.facing_right = True
             elif dx < 0:
                 self.facing_right = False
+            if self.facing_right:
+                self.image = self.image_right
+            else:
+                self.image = self.image_left
         
-        # TODO: 지형 충돌 로직 추가 필요
 
     def draw_aim_indicator(self, surface):
         # 현재 각도로 조준선 그리기
@@ -125,11 +143,12 @@ class Terrain:
     def __init__(self):
         # 2D 배열로 맵 표현 (0: 빈 공간, 1: 흙)
         self.tiles = [[0 for _ in range(MAP_WIDTH)] for _ in range(MAP_HEIGHT)]
-        # self.create_flat_map()
+        self.map_theme = "default"
 
     # 맵 1번: 평평한 맵
     def create_map_1(self):
         print("Loding Map 1: 평원")
+        self.map_theme = "plains"
         map_level = MAP_HEIGHT * 3 // 4
         terrain_thickness = 25  # 땅 두께 타일 개수
 
@@ -143,6 +162,7 @@ class Terrain:
 
     def create_map_2(self):
         print("Loding Map 2: 구룽지")
+        self.map_theme = "hills"
         map_level = MAP_HEIGHT * 3 // 4
         terrain_thickness = 25  # 땅 두께 설정
 
@@ -150,13 +170,12 @@ class Terrain:
         spawn_x_2 = (SCREEN_WIDTH * 3 // 4) // TILE_SIZE
         platform_width = 30 
         
-        # [!!!] (수정) MAP_HEIGHT 대신 'map_level + terrain_thickness' 까지 루프
+        # MAP_HEIGHT 대신 'map_level + terrain_thickness' 까지 루프
         for y in range(map_level, map_level + terrain_thickness):
             if y >= MAP_HEIGHT:
                 break
             
             for x in range(MAP_WIDTH):
-                # ... (이하 is_platform_area 로직은 동일) ...
                 is_platform_area = False
                 if x <= spawn_x_1 + platform_width // 2:
                     is_platform_area = True
@@ -164,12 +183,16 @@ class Terrain:
                     is_platform_area = True
 
                 if is_platform_area:
-                    self.tiles[y][x] = 1
+                    if random.random() < 0.3:
+                        self.tiles[y][x] = 2
+                    else:
+                        self.tiles[y][x] = 1
                 else:
                     self.tiles[y][x] = 0
-
+                
     def create_map_3(self):
         print("Loding Map 3: 설원")
+        self.map_theme = "snow"
         base_level = MAP_HEIGHT * 3 // 4
         terrain_thickness = 25
         
@@ -200,8 +223,23 @@ class Terrain:
         # 지형 그리기
         for y, row in enumerate(self.tiles):
             for x, tile in enumerate(row):
-                if tile == 1:
-                    rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+
+                if tile == 0:
+                    continue # 빈 공간은 그리지 않음
+
+                rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+
+                if self.map_theme == "plains":
+                    pygame.draw.rect(surface, EARTH_GREEN, rect)
+                elif self.map_theme == "snow":
+                    pygame.draw.rect(surface, SNOW_WHITE, rect)
+                elif self.map_theme == "hills":
+                    if tile == 1:
+                        pygame.draw.rect(surface, ROCK_GRAY_DARK, rect)
+                    elif tile == 2:
+                        pygame.draw.rect(surface, ROCK_GRAY_LIGHT, rect)
+                else:
+                    # 기본 맵 (오류 시 회색)
                     pygame.draw.rect(surface, GRAY, rect)
 
     def destroy_terrain(self, x, y, radius):
@@ -250,8 +288,8 @@ class Projectile(pygame.sprite.Sprite):
         self.hit = False
 
         # (추가) 그린 스킬을 위한 변수
-        self.prev_vel_y = self.vel_y    # 이전 y속도 (정점 확인용)
         self.split_done = False         # 분리가 완료되었는지
+        self.spawn_time = pygame.time.get_ticks()
 
     def update(self, terrain, players):
         new_projectiles = [] # (추가) 새로 생성될 발사체를 담을 리스트
@@ -259,26 +297,29 @@ class Projectile(pygame.sprite.Sprite):
         if not self.hit:
             # (추가) 그린 스킬 - 정점에서 분리 로직
             if self.char_type == 3 and self.bonus_shot and not self.split_done:
+                split_delay = 700 # 몇 초 후에 분리 되는지 설정
+                current_time = pygame.time.get_ticks()
+
                 # 1. 포물선의 정점(vel_y가 0을 지날 때)인지 확인
-                if self.vel_y > 0 and self.prev_vel_y <= 0:
+                if current_time - self.spawn_time > split_delay:
                     print("그린 스킬 발동!")
                     self.split_done = True # 한 번만 분리되도록
 
                     # 2. 3개의 새로운 '자식' 발사체 생성
                     # (char_type은 3, bonus_shot은 False로 줘서 자식이 또 분리되지 않게 함)
                     p1 = Projectile(self.x, self.y, 0, 3, False)
-                    p1.vel_x = self.vel_x - 3   # 좌측
-                    p1.vel_y = self.vel_y - 2   # 살짝 위로
+                    p1.vel_x = self.vel_x -1   # 좌측
+                    p1.vel_y = self.vel_y  
                     p1.split_done = True        # 자식은 분리 안 함
 
                     p2 = Projectile(self.x, self.y, 0, 3, False)
                     p2.vel_x = self.vel_x       # 중앙
-                    p2.vel_y = self.vel_y - 3   # 더 위로 (가운데가 높이)
+                    p2.vel_y = self.vel_y       # 더 위로 (가운데가 높이)
                     p2.split_done = True
                     
                     p3 = Projectile(self.x, self.y, 0, 3, False)
-                    p3.vel_x = self.vel_x + 3   # 우측
-                    p3.vel_y = self.vel_y - 2   # 살짝 위로
+                    p3.vel_x = self.vel_x + 1   # 우측
+                    p3.vel_y = self.vel_y   
                     p3.split_done = True
 
                     new_projectiles.extend([p1, p2, p3])
@@ -302,7 +343,7 @@ class Projectile(pygame.sprite.Sprite):
             tile_y = self.rect.centery // TILE_SIZE
             
             if 0 <= tile_x < MAP_WIDTH and 0 <= tile_y < MAP_HEIGHT:
-                if terrain.tiles[tile_y][tile_x] == 1:
+                if terrain.tiles[tile_y][tile_x] in (1, 2):
                     self.hit = True
                     self.explode(terrain, players)
                     return new_projectiles
@@ -311,7 +352,6 @@ class Projectile(pygame.sprite.Sprite):
             if not (0 <= self.rect.centerx <= SCREEN_WIDTH and 0 <= self.rect.centery <= SCREEN_HEIGHT * 2):
                 self.kill() # 스프라이트 그룹에서 제거
 
-        self.prev_vel_y = self.vel_y
         return new_projectiles
 
     # 지형 파괴 속성 함수 만들기
@@ -371,7 +411,7 @@ class Projectile(pygame.sprite.Sprite):
 
 # 메인 게임 로직 클래스 설정
 class Game:
-    def __init__(self, surface):
+    def __init__(self, surface, p1_type, p2_type):
         self.surface = surface
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 36)
@@ -382,8 +422,8 @@ class Game:
         # 랜덤으로 돌릴 맵들을 리스트로 저장하기
         map_choices = [
             {'bg': './images/평야배경.jpg', 'terrain_method': self.terrain.create_map_1},
-            {'bg': './images/설원배경.jpg', 'terrain_method': self.terrain.create_map_2},
-            {'bg': './images/우주하늘배경.jpg', 'terrain_method': self.terrain.create_map_3}
+            {'bg': './images/우주하늘배경.jpg', 'terrain_method': self.terrain.create_map_2},
+            {'bg': './images/설원배경.jpg', 'terrain_method': self.terrain.create_map_3}
         ]
 
         # 저장한 리스트에 있는 맵들을 랜덤으로 선택하기
@@ -407,10 +447,10 @@ class Game:
         self.player_list = [
             Player(SCREEN_WIDTH // 4, 
                    0,
-                   RED, player_1_controls, char_type=1),
+                   RED, player_1_controls, char_type=p1_type),
             Player(SCREEN_WIDTH * 3 // 4, 
                    0,
-                   BLUE, player_2_controls, char_type=2)
+                   BLUE, player_2_controls, char_type=p2_type)
         ]
         self.players.add(self.player_list)
         
@@ -441,8 +481,14 @@ class Game:
         self.bonus_shot = False
 
     def run(self):
-        while True:
-            self.handle_events()
+        while True: # 게임 루프
+            event_result = self.handle_events() # 이벤트 처리
+            
+            if event_result == 'QUIT':
+                return 'QUIT' # 메인 루프에 '종료' 신호 전달
+            if event_result == 'RESTART':
+                return 'RESTART' # 메인 루프에 '재시작' 신호 전달
+            
             self.update()
             self.draw()
             self.clock.tick(FPS)
@@ -451,18 +497,13 @@ class Game:
         events = pygame.event.get()
         for event in events:
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-
-            # --- 상태별 키 입력 처리 ---
-            keys = pygame.key.get_pressed()
+                return 'QUIT'
             
-            # [1. 이동 상태]
-            if self.game_state == "MOVE":
-                if keys[self.current_player.controls['left']]:
-                    self.current_player.move(-5, self.terrain)
-                if keys[self.current_player.controls['right']]:
-                    self.current_player.move(5, self.terrain)
+            # 재시작 로직 추가하기 키보드 R키로 설정
+            if self.game_state == "GAMEOVER":
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_r:
+                    print("재시작! 캐릭터 선택창으로 돌아갑니다...")
+                    return 'RESTART'
             
             # [2. 조준 1단계 (각도) 상태]
             elif self.game_state == "AIM_1":
@@ -492,6 +533,16 @@ class Game:
                         print("실패!")
                     
                     self.fire_projectile()
+
+        keys = pygame.key.get_pressed()
+
+        if self.game_state == "MOVE":
+            if keys[self.current_player.controls['left']]:
+                self.current_player.move(-1, self.terrain)
+            if keys[self.current_player.controls['right']]:
+                self.current_player.move(1, self.terrain)
+
+        return None   # 신호 없으면 게임 계속 진행하기
             
     def update(self):
         current_time = pygame.time.get_ticks()
@@ -540,7 +591,6 @@ class Game:
 
         # 공통 업데이트
         self.players.update(self.terrain)
-        self.projectiles.update(self.terrain, self.players)
 
         new_projectiles_list = []
         for proj in self.projectiles:
@@ -572,9 +622,6 @@ class Game:
             print("레드 스킬 발동! 3발 연속 발사!")
             self.multi_shot_counter = 3  # (총 3발)
             self.multi_shot_angle = angle
-            
-            # (중요) 스킬 발동했으니 bonus_shot 플래그는 '사용'한 것으로 간주
-            # self.bonus_shot = False # (이건 explode 수정을 보고 결정)
 
         # 2. 그 외 모든 경우 (일반 발사)
         else:
@@ -665,15 +712,197 @@ class Game:
         elif self.game_state == "GAMEOVER":
             win_text = self.font.render(f"Player {self.player_list.index(self.winner) + 1} WINS!", True, self.winner.color, BLACK)
             self.surface.blit(win_text, (SCREEN_WIDTH // 2 - win_text.get_width() // 2, SCREEN_HEIGHT // 2 - win_text.get_height() // 2))
+            # 재시작 안내 텍스트 출력
+            restart_font = pygame.font.SysFont(None, 30) 
+            restart_text = restart_font.render("Press 'R' to Restart", True, WHITE, BLACK)
+            self.surface.blit(restart_text, (SCREEN_WIDTH // 2 - restart_text.get_width() // 2, SCREEN_HEIGHT // 2 + 40))
 
         pygame.display.flip()
 
-# 게임 시작
-if __name__ == "__main__":
+# 메인 화면 출력과 케릭터 선택창 만들기
+def character_selection_screen(screen, clock):
+
+    # 배경 이미지 추가
+    try:
+        main_background_image = pygame.image.load('./images/시작화면배경.png').convert()
+        main_background_image = pygame.transform.scale(main_background_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
+    except pygame.error as e:
+        print(f"메인 배경 이미지 로드 실패: {e}")
+        main_background_image = None # 로드 실패 시 None으로 설정
+
+    # 케릭터 이미지 붙이기
+    p1_img = pygame.image.load('./images/red.png').convert_alpha()
+    p2_img = pygame.image.load('./images/blue.png').convert_alpha()
+    p3_img = pygame.image.load('./images/green.png').convert_alpha()
+
+    preview_size1 = (200, 200) # 선택창에 보여줄 이미지 크기 (조절 가능)
+    preview_size2 = (120, 120) # 선택창에 보여줄 이미지 크기 (조절 가능)
+    preview_size3 = (200, 200) # 선택창에 보여줄 이미지 크기 (조절 가능)
+    char_images = {
+        1: pygame.transform.scale(p1_img, preview_size1),
+        2: pygame.transform.scale(p2_img, preview_size2),
+        3: pygame.transform.scale(p3_img, preview_size3)
+    }
+    
+    font_large = pygame.font.SysFont(None, 72)
+    font_small = pygame.font.SysFont(None, 48)
+    
+    p1_choice = 1 # 1: Red, 2: Blue, 3: Green
+    p2_choice = 2
+    
+    char_names = {1: "RED (Kim apple)", 2: "BLUE (Ban hana)", 3: "GREEN (Lee Melon)"}
+    char_colors = {1: RED, 2: BLUE, 3: GREEN}
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return 'QUIT' # 종료
+            if event.type == pygame.KEYDOWN:
+                # P1 선택 (A, D 키)
+                if event.key == pygame.K_a:
+                    p1_choice = (p1_choice - 2) % 3 + 1 # 1->3, 2->1, 3->2
+                if event.key == pygame.K_d:
+                    p1_choice = (p1_choice % 3) + 1 # 1->2, 2->3, 3->1
+                
+                # P2 선택 (왼쪽, 오른쪽 화살표)
+                if event.key == pygame.K_LEFT:
+                    p2_choice = (p2_choice - 2) % 3 + 1
+                if event.key == pygame.K_RIGHT:
+                    p2_choice = (p2_choice % 3) + 1
+                
+                # 게임 시작 (Enter 또는 스페이스)
+                if event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+                    return (p1_choice, p2_choice)
+
+        # 배경 이미지 그리기
+        if main_background_image:
+            screen.blit(main_background_image, (0, 0)) 
+        else:
+            screen.fill(GRAY)
+        
+        # title_text = font_large.render("CHOOSE YOUR CHARACTER", True, WHITE)
+        # screen.blit(title_text, (SCREEN_WIDTH // 2 - title_text.get_width() // 2, 100))
+        
+        # 1. P1 정보 미리 정의 (텍스트, 이미지)
+        p1_title = font_small.render("PLAYER 1", True, char_colors[p1_choice])
+        p1_preview_image = char_images[p1_choice]
+        p1_name = font_small.render(char_names[p1_choice], True, WHITE)
+        p1_controls = font_small.render("(A, D to change)", True, BLACK)
+
+        # 2. 반투명 박스 계산
+        # (텍스트와 이미지 중 가장 넓은 것을 기준으로)
+        box_width = max(p1_title.get_width(), 
+                        p1_preview_image.get_width(), 
+                        p1_name.get_width(), 
+                        p1_controls.get_width()) + 40
+        
+        # (Y좌표를 기준으로 높이 계산)
+        top_y = 250  # P1 Title Y
+        bottom_y = 500 + p1_controls.get_height() # Controls Y + Controls Height
+        
+        padding = 20 # 상/하 여백
+        box_y = top_y - padding
+        box_height = (bottom_y + padding) - box_y # (수정) 실제 콘텐츠 높이에 맞춤
+
+        # 반투명 표면 생성 (SRCALPHA가 중요)
+        transparent_surface = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
+        pygame.draw.rect(transparent_surface, (0, 0, 0, 150), transparent_surface.get_rect(), border_radius=10) # 검정색, 투명도 150
+
+        # 박스 중앙 정렬
+        box_x = SCREEN_WIDTH // 4 - box_width // 2 
+        screen.blit(transparent_surface, (box_x, box_y))
+
+        # 3. 그 위에 텍스트와 이미지 그리기
+        screen.blit(p1_title, (SCREEN_WIDTH // 4 - p1_title.get_width() // 2, 250))
+        screen.blit(p1_preview_image, (SCREEN_WIDTH // 4 - p1_preview_image.get_width() // 2, 300))
+        screen.blit(p1_name, (SCREEN_WIDTH // 4 - p1_name.get_width() // 2, 450))
+        screen.blit(p1_controls, (SCREEN_WIDTH // 4 - p1_controls.get_width() // 2, 500))
+
+
+        # 1. P2 정보 미리 정의 (텍스트, 이미지)
+        p2_title = font_small.render("PLAYER 2", True, char_colors[p2_choice])
+        p2_preview_image = char_images[p2_choice]
+        p2_name = font_small.render(char_names[p2_choice], True, WHITE)
+        p2_controls = font_small.render("(<- , -> to change)", True, BLACK)
+
+        # 2. 반투명 박스 계산
+        # (텍스트와 이미지 중 가장 넓은 것을 기준으로)
+        box_width_p2 = max(p2_title.get_width(), 
+                           p2_preview_image.get_width(), 
+                           p2_name.get_width(), 
+                           p2_controls.get_width()) + 40
+        
+        # (Y좌표를 기준으로 높이 계산)
+        top_y_p2 = 250  # P2 Title Y
+        bottom_y_p2 = 500 + p2_controls.get_height() # Controls Y + Controls Height
+        
+        padding_p2 = 20 # 상/하 여백
+        box_y_p2 = top_y_p2 - padding_p2
+        box_height_p2 = (bottom_y_p2 + padding_p2) - box_y_p2
+
+        # 반투명 표면 생성
+        transparent_surface_p2 = pygame.Surface((box_width_p2, box_height_p2), pygame.SRCALPHA)
+        pygame.draw.rect(transparent_surface_p2, (0, 0, 0, 150), transparent_surface_p2.get_rect(), border_radius=10) # 검정색, 투명도 150
+
+        # 박스 중앙 정렬 (P2 위치 기준)
+        box_x_p2 = (SCREEN_WIDTH * 3 // 4) - box_width_p2 // 2 
+        screen.blit(transparent_surface_p2, (box_x_p2, box_y_p2))
+
+        # 3. 그 위에 텍스트와 이미지 그리기
+        screen.blit(p2_title, (SCREEN_WIDTH * 3 // 4 - p2_title.get_width() // 2, 250))
+        screen.blit(p2_preview_image, (SCREEN_WIDTH * 3 // 4 - p2_preview_image.get_width() // 2, 300))
+        screen.blit(p2_name, (SCREEN_WIDTH * 3 // 4 - p2_name.get_width() // 2, 450))
+        screen.blit(p2_controls, (SCREEN_WIDTH * 3 // 4 - p2_controls.get_width() // 2, 500))
+
+
+        # 시작 안내
+        start_text = font_small.render("Press ENTER to Start", True, YELLOW)
+        
+        # 시작 안내 텍스트에도 반투명 박스 추가
+        start_box_width = start_text.get_width() + 40
+        start_box_height = start_text.get_height() + 20
+        start_box_x = SCREEN_WIDTH // 2 - start_box_width // 2
+        start_box_y = (SCREEN_HEIGHT - 100) - 10
+        
+        transparent_surface_start = pygame.Surface((start_box_width, start_box_height), pygame.SRCALPHA)
+        pygame.draw.rect(transparent_surface_start, (0, 0, 0, 150), transparent_surface_start.get_rect(), border_radius=10)
+        screen.blit(transparent_surface_start, (start_box_x, start_box_y))
+        
+        # 시작 안내 텍스트 그리기
+        screen.blit(start_text, (SCREEN_WIDTH // 2 - start_text.get_width() // 2, SCREEN_HEIGHT - 100))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+
+def main():
+    """ 메인 게임 루프 (재시작 처리) """
     pygame.init()
     pygame.font.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("Artillery Knock-off Game Prototype")
-    
-    game = Game(screen)
-    game.run()
+    clock = pygame.time.Clock() # 캐릭터 선택창에서도 사용하기 위해
+
+    while True:
+        # 1. 캐릭터 선택창 표시
+        choices = character_selection_screen(screen, clock)
+        if choices == 'QUIT':
+            break
+        
+        p1_type, p2_type = choices
+        
+        # 2. 게임 시작 (선택된 캐릭터로)
+        game = Game(screen, p1_type, p2_type)
+        game_status = game.run() # 게임 한 판 실행
+
+        if game_status == 'QUIT':
+            break # 전체 게임 종료
+
+        # game_status가 'RESTART'면, while 루프가 처음으로 돌아가
+        # character_selection_screen()을 다시 실행합니다.
+
+    pygame.quit()
+    sys.exit()
+
+# 게임 시작
+if __name__ == "__main__":
+    main() # 메인 함수 호출
