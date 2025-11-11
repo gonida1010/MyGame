@@ -131,7 +131,12 @@ class Terrain:
     def create_map_1(self):
         print("Loding Map 1: 평원")
         map_level = MAP_HEIGHT * 3 // 4
-        for y in range(map_level, MAP_HEIGHT):
+        terrain_thickness = 25  # 땅 두께 타일 개수
+
+        for y in range(map_level, map_level + terrain_thickness):
+            if y >= MAP_HEIGHT: # 맵 높이를 벗어나지 않도록
+                break
+            
             for x in range(MAP_WIDTH // 5, MAP_WIDTH * 4 // 5):
                 self.tiles[y][x] = 1
 
@@ -139,20 +144,57 @@ class Terrain:
     def create_map_2(self):
         print("Loding Map 2: 구룽지")
         map_level = MAP_HEIGHT * 3 // 4
-        for y in range(map_level, MAP_HEIGHT):
+        terrain_thickness = 25  # 땅 두께 설정
+
+        spawn_x_1 = (SCREEN_WIDTH // 4) // TILE_SIZE
+        spawn_x_2 = (SCREEN_WIDTH * 3 // 4) // TILE_SIZE
+        platform_width = 30 
+        
+        # [!!!] (수정) MAP_HEIGHT 대신 'map_level + terrain_thickness' 까지 루프
+        for y in range(map_level, map_level + terrain_thickness):
+            if y >= MAP_HEIGHT:
+                break
+            
             for x in range(MAP_WIDTH):
-                if x < MAP_WIDTH // 4 or x > MAP_WIDTH * 3 // 4:
+                # ... (이하 is_platform_area 로직은 동일) ...
+                is_platform_area = False
+                if x <= spawn_x_1 + platform_width // 2:
+                    is_platform_area = True
+                if x >= spawn_x_2 - platform_width // 2:
+                    is_platform_area = True
+
+                if is_platform_area:
                     self.tiles[y][x] = 1
+                else:
+                    self.tiles[y][x] = 0
 
     def create_map_3(self):
         print("Loding Map 3: 설원")
-        base_level = MAP_HEIGHT * 3 // 4        
+        base_level = MAP_HEIGHT * 3 // 4
+        terrain_thickness = 25
+        
+        spawn_x_1 = (SCREEN_WIDTH // 4) // TILE_SIZE
+        spawn_x_2 = (SCREEN_WIDTH * 3 // 4) // TILE_SIZE
+        platform_width = 15
+
         for x in range(MAP_WIDTH):
-            hill_height = int(math.sin(x * 0.02) * (MAP_HEIGHT // 10))
-            map_level = base_level - hill_height
-            for y in range(map_level, MAP_HEIGHT):
+            is_platform_area = False
+            if spawn_x_1 - platform_width // 2 <= x <= spawn_x_1 + platform_width // 2:
+                is_platform_area = True
+            if spawn_x_2 - platform_width // 2 <= x <= spawn_x_2 + platform_width // 2:
+                is_platform_area = True
+
+            if is_platform_area:
+                map_level = base_level
+            else:
+                hill_height = int(math.sin(x * 0.02) * (MAP_HEIGHT // 10))
+                map_level = base_level - hill_height
+            
+            # [!!!] (수정) 이 안쪽 루프를 수정합니다.
+            for y in range(map_level, map_level + terrain_thickness):
+                if y >= MAP_HEIGHT:
+                    break
                 self.tiles[y][x] = 1
-                # 여기까지
 
     def draw(self, surface):
         # 지형 그리기
@@ -207,8 +249,45 @@ class Projectile(pygame.sprite.Sprite):
         self.particles = [] # 궤적용
         self.hit = False
 
+        # (추가) 그린 스킬을 위한 변수
+        self.prev_vel_y = self.vel_y    # 이전 y속도 (정점 확인용)
+        self.split_done = False         # 분리가 완료되었는지
+
     def update(self, terrain, players):
+        new_projectiles = [] # (추가) 새로 생성될 발사체를 담을 리스트
+
         if not self.hit:
+            # (추가) 그린 스킬 - 정점에서 분리 로직
+            if self.char_type == 3 and self.bonus_shot and not self.split_done:
+                # 1. 포물선의 정점(vel_y가 0을 지날 때)인지 확인
+                if self.vel_y > 0 and self.prev_vel_y <= 0:
+                    print("그린 스킬 발동!")
+                    self.split_done = True # 한 번만 분리되도록
+
+                    # 2. 3개의 새로운 '자식' 발사체 생성
+                    # (char_type은 3, bonus_shot은 False로 줘서 자식이 또 분리되지 않게 함)
+                    p1 = Projectile(self.x, self.y, 0, 3, False)
+                    p1.vel_x = self.vel_x - 3   # 좌측
+                    p1.vel_y = self.vel_y - 2   # 살짝 위로
+                    p1.split_done = True        # 자식은 분리 안 함
+
+                    p2 = Projectile(self.x, self.y, 0, 3, False)
+                    p2.vel_x = self.vel_x       # 중앙
+                    p2.vel_y = self.vel_y - 3   # 더 위로 (가운데가 높이)
+                    p2.split_done = True
+                    
+                    p3 = Projectile(self.x, self.y, 0, 3, False)
+                    p3.vel_x = self.vel_x + 3   # 우측
+                    p3.vel_y = self.vel_y - 2   # 살짝 위로
+                    p3.split_done = True
+
+                    new_projectiles.extend([p1, p2, p3])
+
+                    # 3. 원본(부모) 발사체는 제거
+                    self.kill() 
+                    return new_projectiles # 새 발사체 리스트를 반환하고 즉시 종료
+            # --- (그린 스킬 로직 끝) ---
+
             self.vel_y += GRAVITY
             self.x += self.vel_x
             self.y += self.vel_y
@@ -226,10 +305,14 @@ class Projectile(pygame.sprite.Sprite):
                 if terrain.tiles[tile_y][tile_x] == 1:
                     self.hit = True
                     self.explode(terrain, players)
+                    return new_projectiles
 
             # 화면 밖으로 나감 (낙사 아님, 그냥 소멸)
             if not (0 <= self.rect.centerx <= SCREEN_WIDTH and 0 <= self.rect.centery <= SCREEN_HEIGHT * 2):
                 self.kill() # 스프라이트 그룹에서 제거
+
+        self.prev_vel_y = self.vel_y
+        return new_projectiles
 
     # 지형 파괴 속성 함수 만들기
     def explode(self, terrain, players):
@@ -237,23 +320,14 @@ class Projectile(pygame.sprite.Sprite):
         
         # 캐릭터 2 (광역 폭발)
         if self.char_type == 2 and self.bonus_shot:
-            radius = 65
-        
-        # 캐릭터 1 (3발 집중) - 여기서는 파괴 반경으로 대체
-        if self.char_type == 1 and self.bonus_shot:
-            terrain.destroy_terrain(self.rect.centerx, self.rect.centery, radius)
-            terrain.destroy_terrain(self.rect.centerx + 10, self.rect.centery, radius)
-            terrain.destroy_terrain(self.rect.centerx - 10, self.rect.centery, radius)
+            radius = 70
         
         # 캐릭터 3 (3발 분산)
-        elif self.char_type == 3 and self.bonus_shot:
-            terrain.destroy_terrain(self.rect.centerx, self.rect.centery, radius)
-            terrain.destroy_terrain(self.rect.centerx + 40, self.rect.centery, radius // 2)
-            terrain.destroy_terrain(self.rect.centerx - 40, self.rect.centery, radius // 2)
-        else:
-            # 기본 1발
-            terrain.destroy_terrain(self.rect.centerx, self.rect.centery, radius)
+        if self.char_type == 3 and self.bonus_shot:
+            pass
         
+        terrain.destroy_terrain(self.rect.centerx, self.rect.centery, radius)
+
         # --- (넉백 로직 추가) ---
         knockback_radius = radius * 2  # 넉백 범위
         max_knockback_force = 8        # 최대 넉백 힘
@@ -302,12 +376,28 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 36)
         
-        # 배경추가하기
-        # try:
-        #     self.background_image = pygame.iamge.load(./images/)
-
+        # 먼저 빈 지형 객체를 생성한다
         self.terrain = Terrain()
-        
+
+        # 랜덤으로 돌릴 맵들을 리스트로 저장하기
+        map_choices = [
+            {'bg': './images/평야배경.jpg', 'terrain_method': self.terrain.create_map_1},
+            {'bg': './images/설원배경.jpg', 'terrain_method': self.terrain.create_map_2},
+            {'bg': './images/우주하늘배경.jpg', 'terrain_method': self.terrain.create_map_3}
+        ]
+
+        # 저장한 리스트에 있는 맵들을 랜덤으로 선택하기
+        chosen_map = random.choice(map_choices)
+        # 선택된 맵의 배경 이미지를 로드하기
+        try:
+            self.background_image = pygame.image.load(chosen_map['bg']).convert()
+            self.background_image = pygame.transform.scale(self.background_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
+        except pygame.error as e:
+            print(f"Error!! {chosen_map['bg']} 배경 이미지를 불러오지 못했습니다. {e}")
+            self.background_image = None
+
+        chosen_map['terrain_method']()
+
         # 플레이어 생성 (컨트롤, 캐릭터 타입 지정)
         player_1_controls = {'left': pygame.K_a, 'right': pygame.K_d, 'fire': pygame.K_SPACE}
         player_2_controls = {'left': pygame.K_LEFT, 'right': pygame.K_RIGHT, 'fire': pygame.K_RETURN} # Enter 키
@@ -316,17 +406,17 @@ class Game:
 
         self.player_list = [
             Player(SCREEN_WIDTH // 4, 
-                   0, # <- 임시 Y좌표
+                   0,
                    RED, player_1_controls, char_type=1),
             Player(SCREEN_WIDTH * 3 // 4, 
-                   0, # <- 임시 Y좌표
+                   0,
                    BLUE, player_2_controls, char_type=2)
         ]
         self.players.add(self.player_list)
         
         player_height = self.player_list[0].rect.height
 
-        ground_y_center = (MAP_HEIGHT * 3 // 4) * TILE_SIZE - (player_height // 2)+100
+        ground_y_center = (MAP_HEIGHT * 3 // 4) * TILE_SIZE - (player_height // 2)
 
         for player in self.player_list:
             player.rect.centery = ground_y_center
@@ -423,7 +513,9 @@ class Game:
             # 3초 시간 초과 시 실패하고 1발만 발사
             if current_time - self.state_timer > self.aim_2_time_limit:
                 self.bonus_shot = False
-                print("2단계 조준 시간 초과!")
+                self.multi_shot_counter = 0
+                self.multi_shot_angle = 0
+                print("Time over!")
                 self.fire_projectile()
             else:
                 # 2단계 게이지: 상하 이동
@@ -434,12 +526,32 @@ class Game:
 
         elif self.game_state == "FIRE":
             if len(self.projectiles) == 0:
-                # 모든 발사체가 사라지면 턴 변경
-                self.next_turn()
+                # 1. 쏠 발사 횟수가 1발보다 많이 남았는지 확인
+                if self.multi_shot_counter > 1:
+                    print(f"연속 발사: {self.multi_shot_counter - 1}발 남음")
+                    self.multi_shot_counter -= 1
+                    # (딜레이를 살짝 주려면 여기에 타이머를 추가할 수 있음)
+                    self.fire_single_projectile(self.multi_shot_angle)
+                
+                # 2. 쏠 발사 횟수가 1발(이거나 0발)이면 턴 종료
+                else:
+                    self.multi_shot_counter = 0 # 카운터 초기화
+                    self.next_turn() # 턴 넘기기
 
         # 공통 업데이트
         self.players.update(self.terrain)
         self.projectiles.update(self.terrain, self.players)
+
+        new_projectiles_list = []
+        for proj in self.projectiles:
+            # update가 새 발사체 리스트를 반환할 수 있음 (Green 스킬)
+            new_projs = proj.update(self.terrain, self.players) 
+            if new_projs:
+                new_projectiles_list.extend(new_projs)
+        
+        # (루프가 끝난 후) 새로 생성된 발사체들을 메인 그룹에 추가
+        if new_projectiles_list:
+            self.projectiles.add(new_projectiles_list)
         
         # 낙사(승리) 조건 확인
         for player in self.player_list:
@@ -454,17 +566,39 @@ class Game:
         angle = self.current_player.angle
         if not self.current_player.facing_right:
             angle = 180 - angle
+        
+        # 1. 레드가 스킬을 쓴 경우
+        if self.current_player.char_type == 1 and self.bonus_shot:
+            print("레드 스킬 발동! 3발 연속 발사!")
+            self.multi_shot_counter = 3  # (총 3발)
+            self.multi_shot_angle = angle
+            
+            # (중요) 스킬 발동했으니 bonus_shot 플래그는 '사용'한 것으로 간주
+            # self.bonus_shot = False # (이건 explode 수정을 보고 결정)
 
+        # 2. 그 외 모든 경우 (일반 발사)
+        else:
+            self.multi_shot_counter = 1  # (총 1발)
+            self.multi_shot_angle = angle
+
+        # 3. 연속 발사든, 일반 발사든 [첫 번째 발]을 발사합니다.
+        self.fire_single_projectile(self.multi_shot_angle)
+        
+    def fire_single_projectile(self, angle):
+        """단일 발사체를 생성하고 그룹에 추가합니다."""
         proj = Projectile(self.current_player.rect.centerx, 
                           self.current_player.rect.centery, 
                           angle, 
                           self.current_player.char_type, 
-                          self.bonus_shot)
+                          self.bonus_shot) # bonus_shot 값은 넘겨주되...
+        
+        # bonus_shot이 스킬 발동 '여부'만 체크하도록,
+        # Projectile 클래스에서는 이 값을 사용하지 않게 해야 함. (explode 수정 필요)
+        
         self.projectiles.add(proj)
-        
-        # 캐릭터 1 (3발 집중) - TODO: 실제 3발 발사 로직으로 변경 필요
-        # 현재는 Projectile 클래스의 explode에서 처리하고 있음
-        
+
+
+
     def next_turn(self):
         self.turn_index = (self.turn_index + 1) % len(self.player_list)
         self.current_player = self.player_list[self.turn_index]
@@ -472,9 +606,12 @@ class Game:
         self.state_timer = pygame.time.get_ticks() # 5초 이동 타이머 시작
         print(f"플레이어 {self.turn_index + 1} 턴 시작")
 
+    # 화면에 출력되는 함수
     def draw(self):
-        # 모든 것을 화면에 출력하기
-        self.surface.fill(SKY_BLUE)
+        if self.background_image:
+            self.surface.blit(self.background_image, (0, 0))
+        else: # 이미지 로드 실패시 출력되는 화면 창
+            self.surface.fill(SKY_BLUE)
         
         # 지형 그리기
         self.terrain.draw(self.surface)
