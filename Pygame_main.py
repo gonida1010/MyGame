@@ -1,6 +1,7 @@
 import pygame
 import sys
 import math
+import random
 
 # 기본 상수 설정(고정될 값은 대문자로 표현하기)
 # 기본 게임 화면 설정
@@ -29,14 +30,35 @@ MAP_HEIGHT = SCREEN_HEIGHT // TILE_SIZE
 class Player(pygame.sprite.Sprite):
     def __init__(self, x, y, color, controls, char_type=1):
         super().__init__()
-        self.image = pygame.Surface((TILE_SIZE * 4, TILE_SIZE * 4))
-        self.image.fill(color)
+        if char_type == 1:
+            self.image = pygame.image.load('./images/red.png').convert_alpha()
+        elif char_type == 2:
+            self.image = pygame.image.load('./images/blue.png').convert_alpha()
+        elif char_type == 3:
+            self.image = pygame.image.load('./images/green.png').convert_alpha()
+        else:  # (기본값) 또는 선택 오류 시 기본 픽셀로 된 이미지
+            self.image = pygame.Surface((TILE_SIZE * 4, TILE_SIZE * 4))
+            self.image.fill(color)
+
+        # 이미지를 먼저 원하는 크기로 조절합니다.
+        self.image = pygame.transform.scale(self.image, (TILE_SIZE * 8, TILE_SIZE * 8))
+
         self.rect = self.image.get_rect(center=(x, y))
+
         self.color = color
         self.controls = controls  # {'left': key, 'right': key, 'fire': key}
         self.char_type = char_type
         self.angle = 45  # 초기 발사 각도
         self.facing_right = True
+
+        if self.char_type == 1:
+            self.y_offset = -12  # 빨간색 캐릭터의 발 위치 오프셋
+        elif self.char_type == 2:
+            self.y_offset = -2  # 파란색 캐릭터의 발 위치 오프셋
+        elif self.char_type == 3:
+            self.y_offset = 10  # 초록색 캐릭터의 발 위치 오프셋
+        else:
+            self.y_offset = 0   # 기본 사각형 캐릭터의 오프셋
 
         # 넉백 기능 추가하기=> 중력을 위한 속도 변수 추가
         self.vel_x = 0.0
@@ -63,8 +85,9 @@ class Player(pygame.sprite.Sprite):
     def is_on_ground(self, terrain):
         # 플레이어가 땅에 있는지 확인하기
         # 플레이어 발밑 타일 확인
+        # y_offset = 0
         feet_tile_x = self.rect.centerx // TILE_SIZE
-        feet_tile_y = (self.rect.bottom + 1) // TILE_SIZE
+        feet_tile_y = (self.rect.bottom + self.y_offset) // TILE_SIZE
         if 0 <= feet_tile_x < MAP_WIDTH and 0 <= feet_tile_y < MAP_HEIGHT:
             return terrain.tiles[feet_tile_y][feet_tile_x] == 1
         return False
@@ -102,14 +125,34 @@ class Terrain:
     def __init__(self):
         # 2D 배열로 맵 표현 (0: 빈 공간, 1: 흙)
         self.tiles = [[0 for _ in range(MAP_WIDTH)] for _ in range(MAP_HEIGHT)]
-        self.create_flat_map()
+        # self.create_flat_map()
 
-    def create_flat_map(self):
-        # 평평한 맵 설정하기
+    # 맵 1번: 평평한 맵
+    def create_map_1(self):
+        print("Loding Map 1: 평원")
         map_level = MAP_HEIGHT * 3 // 4
         for y in range(map_level, MAP_HEIGHT):
             for x in range(MAP_WIDTH // 5, MAP_WIDTH * 4 // 5):
                 self.tiles[y][x] = 1
+
+
+    def create_map_2(self):
+        print("Loding Map 2: 구룽지")
+        map_level = MAP_HEIGHT * 3 // 4
+        for y in range(map_level, MAP_HEIGHT):
+            for x in range(MAP_WIDTH):
+                if x < MAP_WIDTH // 4 or x > MAP_WIDTH * 3 // 4:
+                    self.tiles[y][x] = 1
+
+    def create_map_3(self):
+        print("Loding Map 3: 설원")
+        base_level = MAP_HEIGHT * 3 // 4        
+        for x in range(MAP_WIDTH):
+            hill_height = int(math.sin(x * 0.02) * (MAP_HEIGHT // 10))
+            map_level = base_level - hill_height
+            for y in range(map_level, MAP_HEIGHT):
+                self.tiles[y][x] = 1
+                # 여기까지
 
     def draw(self, surface):
         # 지형 그리기
@@ -136,8 +179,20 @@ class Terrain:
 class Projectile(pygame.sprite.Sprite):
     def __init__(self, x, y, angle, char_type, bonus_shot):
         super().__init__()
-        self.image = pygame.Surface((5, 5))
-        self.image.fill(YELLOW)
+
+        if char_type == 1:
+            self.image = pygame.image.load('./images/투사체_불.png').convert_alpha()
+        elif char_type == 2:
+            self.image = pygame.image.load('./images/투사체_폭탄.png').convert_alpha()
+        elif char_type == 3:
+            self.image = pygame.image.load('./images/투사체_슬라임.png').convert_alpha()
+        else:
+            # 기본 발사체 이미지
+            self.image = pygame.Surface((5, 5))
+            self.image.fill(YELLOW)
+        
+        # 발사체 크기 수정
+        self.image = pygame.transform.scale(self.image, (60, 60))
         self.rect = self.image.get_rect(center=(x, y))
         
         self.x = float(x)
@@ -178,11 +233,11 @@ class Projectile(pygame.sprite.Sprite):
 
     # 지형 파괴 속성 함수 만들기
     def explode(self, terrain, players):
-        radius = 30 # 기본 반경
+        radius = 40 # 기본 반경
         
         # 캐릭터 2 (광역 폭발)
         if self.char_type == 2 and self.bonus_shot:
-            radius = 50
+            radius = 65
         
         # 캐릭터 1 (3발 집중) - 여기서는 파괴 반경으로 대체
         if self.char_type == 1 and self.bonus_shot:
@@ -200,8 +255,8 @@ class Projectile(pygame.sprite.Sprite):
             terrain.destroy_terrain(self.rect.centerx, self.rect.centery, radius)
         
         # --- (넉백 로직 추가) ---
-        knockback_radius = radius * 2.5  # 넉백 범위는 지형 파괴보다 넓게
-        max_knockback_force = 2         # 최대 넉백 힘
+        knockback_radius = radius * 2  # 넉백 범위
+        max_knockback_force = 8        # 최대 넉백 힘
         
         explosion_x, explosion_y = self.rect.center
 
@@ -226,7 +281,7 @@ class Projectile(pygame.sprite.Sprite):
                     knock_y = -knock_y * 0.2 # 방향을 바꿔 약하게 위로 띄움
                 
                 # 6. (게임성 보정) 최소한의 수직 넉백을 보장 (위로 붕 뜨는 느낌)
-                knock_y -= force_magnitude * 0.3
+                knock_y -= force_magnitude * 0.1
 
                 # 7. 플레이어에게 넉백 적용
                 player.apply_knockback(knock_x, knock_y)
@@ -247,6 +302,10 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 36)
         
+        # 배경추가하기
+        # try:
+        #     self.background_image = pygame.iamge.load(./images/)
+
         self.terrain = Terrain()
         
         # 플레이어 생성 (컨트롤, 캐릭터 타입 지정)
@@ -254,12 +313,24 @@ class Game:
         player_2_controls = {'left': pygame.K_LEFT, 'right': pygame.K_RIGHT, 'fire': pygame.K_RETURN} # Enter 키
         
         self.players = pygame.sprite.Group()
+
         self.player_list = [
-            Player(SCREEN_WIDTH // 4, SCREEN_HEIGHT // 2, RED, player_1_controls, char_type=1),
-            Player(SCREEN_WIDTH * 3 // 4, SCREEN_HEIGHT // 2, BLUE, player_2_controls, char_type=2)
+            Player(SCREEN_WIDTH // 4, 
+                   0, # <- 임시 Y좌표
+                   RED, player_1_controls, char_type=1),
+            Player(SCREEN_WIDTH * 3 // 4, 
+                   0, # <- 임시 Y좌표
+                   BLUE, player_2_controls, char_type=2)
         ]
         self.players.add(self.player_list)
         
+        player_height = self.player_list[0].rect.height
+
+        ground_y_center = (MAP_HEIGHT * 3 // 4) * TILE_SIZE - (player_height // 2)+100
+
+        for player in self.player_list:
+            player.rect.centery = ground_y_center
+
         self.projectiles = pygame.sprite.Group()
         
         self.turn_index = 0
@@ -271,8 +342,8 @@ class Game:
         self.aim_2_time_limit = 3000 # 3초
         
         # 게이지 변수
-        self.gauge_1_angle_speed = 2.2
-        self.gauge_2_speed = (SCREEN_HEIGHT // 100) * 1.15 # 2배속 (1단계 게이지는 각도라 속도 비교가 다름)
+        self.gauge_1_angle_speed = 2.4  # 1단계 게이지 속도임
+        self.gauge_2_speed = (SCREEN_HEIGHT // 100) * 1.15 # 2단계 게이지 속도 설정
         self.gauge_2_value = 0
         self.gauge_2_direction = 1
         self.gauge_2_target_y = 0
