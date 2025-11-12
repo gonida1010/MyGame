@@ -8,7 +8,7 @@ import random
 SCREEN_WIDTH = 1280  
 SCREEN_HEIGHT = 720  
 FPS = 60
-GRAVITY = 0.15  # 중력세기 테스트중
+GRAVITY = 0.1  # 중력세기 테스트중
 PROJECTILE_VELOCITY = 10  # 발사 세기 (고정)
 
 # 색상 설정
@@ -453,32 +453,35 @@ class Game:
                    BLUE, player_2_controls, char_type=p2_type)
         ]
         self.players.add(self.player_list)
-        
-        player_height = self.player_list[0].rect.height
-
-        ground_y_center = (MAP_HEIGHT * 3 // 4) * TILE_SIZE - (player_height // 2)
-
         for player in self.player_list:
-            player.rect.centery = ground_y_center
+            player.rect.top = 0
+        
+        # player_height = self.player_list[0].rect.height
+
+        # ground_y_center = (MAP_HEIGHT * 3 // 4) * TILE_SIZE - (player_height // 2)
 
         self.projectiles = pygame.sprite.Group()
         
         self.turn_index = 0
         self.current_player = self.player_list[self.turn_index]
-        self.game_state = "MOVE" # MOVE, AIM_1, AIM_2, FIRE, GAMEOVER
+        self.game_state = "MOVE"
         
         self.state_timer = 0
         self.move_time_limit = 5000  # 5초 (밀리초)
         self.aim_2_time_limit = 3000 # 3초
         
         # 게이지 변수
-        self.gauge_1_angle_speed = 2.4  # 1단계 게이지 속도임
-        self.gauge_2_speed = (SCREEN_HEIGHT // 100) * 1.15 # 2단계 게이지 속도 설정
-        self.gauge_2_value = 0
+        self.gauge_1_angle_speed = 2.4
+        self.gauge_2_speed = 8          # (속도를 고정값으로 변경, 8~10 추천)
+        self.gauge_2_value = 0          # (0 부터 self.gauge_2_height 까지 움직임)
+        self.gauge_2_height = 200       # 게이지의 '높이'
         self.gauge_2_direction = 1
-        self.gauge_2_target_y = 0
-        self.gauge_2_target_height = 20
+        self.gauge_2_target_value = 0   # 0~200 사이의 '값' (Y좌표 아님)
+        self.gauge_2_target_height = 20 # 타겟의 '두께'
         self.bonus_shot = False
+
+        self.multi_shot_counter = 0
+        self.multi_shot_angle = 0
 
     def run(self):
         while True: # 게임 루프
@@ -513,19 +516,19 @@ class Game:
                     self.state_timer = pygame.time.get_ticks() # 3초 타이머 시작
                     self.gauge_2_value = 0
                     self.gauge_2_direction = 1
-                    # 랜덤한 타겟 위치 설정
-                    self.gauge_2_target_y = pygame.Rect(0, 0, 20, self.gauge_2_target_height).centery + (SCREEN_HEIGHT // 2 - 100) + (180 * (pygame.time.get_ticks() % 1000 / 1000.0))
+                    # 랜덤한 타겟 위치 설정 - 랜덤한 '타겟 값' (0 ~ 180)을 설정
+                    self.gauge_2_target_value = random.randint(0, self.gauge_2_height - self.gauge_2_target_height)
             
             # [3. 조준 2단계 (보너스) 상태]
             elif self.game_state == "AIM_2":
                 if event.type == pygame.KEYDOWN and event.key == self.current_player.controls['fire']:
                     # 2단계 게이지 발사!
-                    gauge_rect = pygame.Rect(SCREEN_WIDTH - 50, SCREEN_HEIGHT // 2 - 100, 20, 200)
-                    target_rect = pygame.Rect(gauge_rect.x, self.gauge_2_target_y, gauge_rect.width, self.gauge_2_target_height)
-                    indicator_rect = pygame.Rect(gauge_rect.x, gauge_rect.y + self.gauge_2_value, gauge_rect.width, 5)
+                    # (indicator 두께 5 / 2)
+                    indicator_center = self.gauge_2_value + 2.5 
+                    target_top = self.gauge_2_target_value
+                    target_bottom = self.gauge_2_target_value + self.gauge_2_target_height
 
-                    # 성공 판정
-                    if target_rect.colliderect(indicator_rect):
+                    if target_top <= indicator_center <= target_bottom:
                         self.bonus_shot = True
                         print("SKILL SHOT!")
                     else:
@@ -536,6 +539,8 @@ class Game:
 
         keys = pygame.key.get_pressed()
 
+
+        # 이동 속도 조절(느리게 설정함)
         if self.game_state == "MOVE":
             if keys[self.current_player.controls['left']]:
                 self.current_player.move(-1, self.terrain)
@@ -571,9 +576,12 @@ class Game:
             else:
                 # 2단계 게이지: 상하 이동
                 self.gauge_2_value += self.gauge_2_speed * self.gauge_2_direction
-                gauge_rect = pygame.Rect(SCREEN_WIDTH - 50, SCREEN_HEIGHT // 2 - 100, 20, 200)
-                if self.gauge_2_value <= 0 or self.gauge_2_value >= gauge_rect.height:
+                
+                # 게이지 값이 0~200 사이를 벗어나지 않게
+                if self.gauge_2_value <= 0 or self.gauge_2_value >= self.gauge_2_height:
                     self.gauge_2_direction *= -1
+                    # 경계값 보정
+                    self.gauge_2_value = max(0, min(self.gauge_2_value, self.gauge_2_height))
 
         elif self.game_state == "FIRE":
             if len(self.projectiles) == 0:
@@ -697,16 +705,30 @@ class Game:
             time_text = self.font.render(f"BONUS: {remaining_time:.1f}s", True, RED)
             self.surface.blit(time_text, (SCREEN_WIDTH // 2 - time_text.get_width() // 2, 50))
             
-            # 2단계 게이지 바
-            gauge_rect = pygame.Rect(SCREEN_WIDTH - 50, SCREEN_HEIGHT // 2 - 100, 20, 200)
+            # 1. 게이지 위치 설정 (플레이어 기준)
+            gauge_width = 20
+            # 게이지의 '높이'는 self.gauge_2_height (200)
+            
+            # 플레이어 오른쪽에 40픽셀, 머리 위 100픽셀 지점에 게이지의 [상단]이 오도록
+            gauge_x = self.current_player.rect.right + 40
+            # 만약 플레이어가 너무 오른쪽에 있으면 게이지가 화면 밖으로 나갈 수 있으니 보정
+            if gauge_x + gauge_width > SCREEN_WIDTH - 20:
+                gauge_x = self.current_player.rect.left - 40 - gauge_width # 반대편(왼쪽)에 표시
+            
+            gauge_y = self.current_player.rect.centery - (self.gauge_2_height // 2) # 플레이어 Y 중앙에 맞춤
+            
+            # 게이지 전체 배경
+            gauge_rect = pygame.Rect(gauge_x, gauge_y, gauge_width, self.gauge_2_height)
             pygame.draw.rect(self.surface, BLACK, gauge_rect)
             
-            # 랜덤 타겟
-            target_rect = pygame.Rect(gauge_rect.x, self.gauge_2_target_y, gauge_rect.width, self.gauge_2_target_height)
+            # 2. 랜덤 타겟 (게이지 값 0~200을 Y좌표로 변환)
+            target_y_pos = gauge_y + self.gauge_2_target_value
+            target_rect = pygame.Rect(gauge_x, target_y_pos, gauge_width, self.gauge_2_target_height)
             pygame.draw.rect(self.surface, GREEN, target_rect)
             
-            # 현재 위치 표시
-            indicator_rect = pygame.Rect(gauge_rect.x, gauge_rect.y + self.gauge_2_value, gauge_rect.width, 5)
+            # 3. 현재 위치 표시 (게이지 값 0~200을 Y좌표로 변환)
+            indicator_y_pos = gauge_y + self.gauge_2_value
+            indicator_rect = pygame.Rect(gauge_x, indicator_y_pos, gauge_width, 5) # 두께 5
             pygame.draw.rect(self.surface, YELLOW, indicator_rect)
 
         elif self.game_state == "GAMEOVER":
