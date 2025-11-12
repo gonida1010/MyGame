@@ -8,7 +8,7 @@ import random
 SCREEN_WIDTH = 1280  
 SCREEN_HEIGHT = 720  
 FPS = 60
-GRAVITY = 0.1  # 중력세기 테스트중
+GRAVITY = 0.13  # 중력세기 테스트중
 PROJECTILE_VELOCITY = 10  # 발사 세기 (고정)
 
 # 색상 설정
@@ -33,7 +33,7 @@ MAP_HEIGHT = SCREEN_HEIGHT // TILE_SIZE
 
 # 플레이어 클래스 설정
 class Player(pygame.sprite.Sprite):
-    def __init__(self, x, y, color, controls, char_type=1):
+    def __init__(self, x, y, color, controls, char_type=1, is_ai=False):
         super().__init__()
 
         size_red = (TILE_SIZE * 19, TILE_SIZE * 19)   # 예: (40, 40)
@@ -64,6 +64,7 @@ class Player(pygame.sprite.Sprite):
         self.char_type = char_type
         self.angle = 45  # 초기 발사 각도
         self.facing_right = True
+        self.is_ai = is_ai
 
         if self.char_type == 1:
             self.y_offset = -29  # 빨간색 캐릭터의 발 위치 오프셋
@@ -411,7 +412,7 @@ class Projectile(pygame.sprite.Sprite):
 
 # 메인 게임 로직 클래스 설정
 class Game:
-    def __init__(self, surface, p1_type, p2_type):
+    def __init__(self, surface, p1_type, p2_type, is_ai_p2):
         self.surface = surface
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 36)
@@ -447,18 +448,14 @@ class Game:
         self.player_list = [
             Player(SCREEN_WIDTH // 4, 
                    0,
-                   RED, player_1_controls, char_type=p1_type),
+                   RED, player_1_controls, char_type=p1_type, is_ai=False),
             Player(SCREEN_WIDTH * 3 // 4, 
                    0,
-                   BLUE, player_2_controls, char_type=p2_type)
+                   BLUE, player_2_controls, char_type=p2_type, is_ai=is_ai_p2)
         ]
         self.players.add(self.player_list)
         for player in self.player_list:
             player.rect.top = 0
-        
-        # player_height = self.player_list[0].rect.height
-
-        # ground_y_center = (MAP_HEIGHT * 3 // 4) * TILE_SIZE - (player_height // 2)
 
         self.projectiles = pygame.sprite.Group()
         
@@ -472,7 +469,7 @@ class Game:
         
         # 게이지 변수
         self.gauge_1_angle_speed = 2.4
-        self.gauge_2_speed = 8          # (속도를 고정값으로 변경, 8~10 추천)
+        self.gauge_2_speed = 5          # (속도를 고정값으로 변경, 8~10 추천)
         self.gauge_2_value = 0          # (0 부터 self.gauge_2_height 까지 움직임)
         self.gauge_2_height = 200       # 게이지의 '높이'
         self.gauge_2_direction = 1
@@ -482,6 +479,8 @@ class Game:
 
         self.multi_shot_counter = 0
         self.multi_shot_angle = 0
+
+        self.ai_timer = 0 # [!!!] (추가) AI의 "생각" 시간을 위한 타이머
 
     def run(self):
         while True: # 게임 루프
@@ -508,106 +507,173 @@ class Game:
                     print("재시작! 캐릭터 선택창으로 돌아갑니다...")
                     return 'RESTART'
             
-            # [2. 조준 1단계 (각도) 상태]
-            elif self.game_state == "AIM_1":
-                if event.type == pygame.KEYDOWN and event.key == self.current_player.controls['fire']:
-                    # 1단계 게이지 완료 -> 2단계로
-                    self.game_state = "AIM_2"
-                    self.state_timer = pygame.time.get_ticks() # 3초 타이머 시작
-                    self.gauge_2_value = 0
-                    self.gauge_2_direction = 1
-                    # 랜덤한 타겟 위치 설정 - 랜덤한 '타겟 값' (0 ~ 180)을 설정
-                    self.gauge_2_target_value = random.randint(0, self.gauge_2_height - self.gauge_2_target_height)
+            # AI가 아닐 때만 키 입력을 받음
+            if not self.current_player.is_ai:
             
-            # [3. 조준 2단계 (보너스) 상태]
-            elif self.game_state == "AIM_2":
-                if event.type == pygame.KEYDOWN and event.key == self.current_player.controls['fire']:
-                    # 2단계 게이지 발사!
-                    # (indicator 두께 5 / 2)
-                    indicator_center = self.gauge_2_value + 2.5 
-                    target_top = self.gauge_2_target_value
-                    target_bottom = self.gauge_2_target_value + self.gauge_2_target_height
+                # [2. 조준 1단계 (각도) 상태]
+                if self.game_state == "AIM_1":
+                    if event.type == pygame.KEYDOWN and event.key == self.current_player.controls['fire']:
+                        # 1단계 게이지 완료 -> 2단계로
+                        self.game_state = "AIM_2"
+                        self.state_timer = pygame.time.get_ticks() # 3초 타이머 시작
+                        self.gauge_2_value = 0
+                        self.gauge_2_direction = 1
+                        # 랜덤한 타겟 위치 설정 - 랜덤한 '타겟 값' (0 ~ 180)을 설정
+                        self.gauge_2_target_value = random.randint(0, self.gauge_2_height - self.gauge_2_target_height)
+                
+                # [3. 조준 2단계 (보너스) 상태]
+                elif self.game_state == "AIM_2":
+                    if event.type == pygame.KEYDOWN and event.key == self.current_player.controls['fire']:
+                        # 2단계 게이지 발사!
+                        # (indicator 두께 5 / 2)
+                        indicator_center = self.gauge_2_value + 2.5 
+                        target_top = self.gauge_2_target_value
+                        target_bottom = self.gauge_2_target_value + self.gauge_2_target_height
 
-                    if target_top <= indicator_center <= target_bottom:
-                        self.bonus_shot = True
-                        print("SKILL SHOT!")
-                    else:
-                        self.bonus_shot = False
-                        print("실패!")
-                    
-                    self.fire_projectile()
+                        if target_top <= indicator_center <= target_bottom:
+                            self.bonus_shot = True
+                            print("SKILL SHOT!")
+                        else:
+                            self.bonus_shot = False
+                            print("실패!")
+                        
+                        self.fire_projectile()
 
         keys = pygame.key.get_pressed()
 
-
-        # 이동 속도 조절(느리게 설정함)
-        if self.game_state == "MOVE":
+        if self.game_state == "MOVE" and not self.current_player.is_ai:
             if keys[self.current_player.controls['left']]:
                 self.current_player.move(-1, self.terrain)
             if keys[self.current_player.controls['right']]:
                 self.current_player.move(1, self.terrain)
 
-        return None   # 신호 없으면 게임 계속 진행하기
+        return None
             
+# [Game 클래스 내부]
+
     def update(self):
         current_time = pygame.time.get_ticks()
-        
+
+        # AI의 "뇌" 로직
+        if self.current_player.is_ai and self.game_state != "FIRE":
+            
+            # AI가 "생각"하는 시간 (예: 1초)
+            if current_time - self.ai_timer > 1000: # 1초마다 한 번씩 결정
+
+                if self.game_state == "MOVE":
+                    print("AI: 이동 종료. 조준 시작.")
+                    self.game_state = "AIM_1"
+                    self.ai_timer = current_time # 타이머 리셋
+                
+                elif self.game_state == "AIM_1":
+                
+                    # 1. 목표(P1) 위치 확인
+                    human_player = self.player_list[0]
+                    target_x = human_player.rect.centerx
+                    target_y = human_player.rect.centery
+                    
+                    # 2. AI와 P1 사이의 거리(dx, dy) 계산
+                    dx = target_x - self.current_player.rect.centerx
+                    dy = target_y - self.current_player.rect.centery # (dy가 양수 = P1이 더 낮음)
+                    
+                    # 3. P1을 향한 '직선' 각도 계산 (라디안 -> 각도)
+                    # math.atan2는 (y, x) 순서. (y는 위로 갈수록 +여야 하므로 -dy 사용)
+                    base_angle_rad = math.atan2(-dy, dx) 
+                    base_angle_deg = math.degrees(base_angle_rad)
+
+                    # 4. 방향 설정 (atan2가 0~180, 0~-180 범위를 반환하므로 보정)
+                    if dx < 0: # P1이 왼쪽에 있을 때
+                        self.current_player.facing_right = False
+                        base_angle_deg = 180 - base_angle_deg # Pygame 각도(0~180)로 변환
+                    else: # P1이 오른쪽에 있을 때
+                        self.current_player.facing_right = True
+                        # (base_angle_deg는 0~90이므로 그대로 사용)
+
+                    # 5. [!!!] 명중률 설정 (오차 값) [!!!]
+                    # 중력을 무시한 각도에 '무작위 오차'를 더해 명중률 조절
+                    # (숫자가 클수록 AI가 더 부정확하게 쏩니다)
+                    ACCURACY_ERROR_DEGREES = 15 # (예: -15 ~ +15도 오차)
+                    
+                    ai_angle = base_angle_deg + random.randint(-ACCURACY_ERROR_DEGREES, ACCURACY_ERROR_DEGREES)
+                    
+                    # 각도가 0~180을 벗어나지 않도록 보정
+                    ai_angle = max(5, min(ai_angle, 175)) # (너무 낮거나 높지 않게 5~175로 제한)
+
+                    self.current_player.angle = ai_angle
+                    print(f"AI: P1 조준 (기본각: {base_angle_deg:.0f}, 최종각: {ai_angle:.0f})")
+                    self.game_state = "AIM_2"
+                    self.ai_timer = current_time 
+                    
+                    # (이하 AI 2단계 게이지 타이머 설정은 동일)
+                    self.state_timer = current_time 
+                    self.gauge_2_value = 0
+                    self.gauge_2_direction = 1
+                    self.gauge_2_target_value = random.randint(0, self.gauge_2_height - self.gauge_2_target_height)
+                    # --- (AI 조준 로직 끝) ---
+
+                elif self.game_state == "AIM_2":
+                    print("AI: 발사!")
+                    if random.random() < 0.3: 
+                        self.bonus_shot = True
+                        print("AI: SKILL SHOT!")
+                    else:
+                        self.bonus_shot = False
+                        
+                    self.fire_projectile()
+        # --- (AI 로직 끝) ---
+
+
         # 상태별 업데이트 로직
         if self.game_state == "MOVE":
-            if current_time - self.state_timer > self.move_time_limit:
-                # 5초 이동 시간 종료 -> 조준 1단계 시작
+            # AI가 아닐 때만 시간 초과
+            if not self.current_player.is_ai and (current_time - self.state_timer > self.move_time_limit):
                 self.game_state = "AIM_1"
-                self.current_player.angle = 45 # 각도 초기화
+                self.current_player.angle = 45 
 
         elif self.game_state == "AIM_1":
-            # 1단계 게이지: 각도 조절
-            self.current_player.angle += self.gauge_1_angle_speed
-            if self.current_player.angle > 180 or self.current_player.angle < 0:
-                self.gauge_1_angle_speed *= -1
+            # AI가 아닐 때만 각도 조절
+            if not self.current_player.is_ai:
+                self.current_player.angle += self.gauge_1_angle_speed
+                if self.current_player.angle > 180 or self.current_player.angle < 0:
+                    self.gauge_1_angle_speed *= -1
 
         elif self.game_state == "AIM_2":
-            # 3초 시간 초과 시 실패하고 1발만 발사
-            if current_time - self.state_timer > self.aim_2_time_limit:
+            # AI가 아닐 때만 시간 초과
+            if not self.current_player.is_ai and (current_time - self.state_timer > self.aim_2_time_limit):
                 self.bonus_shot = False
                 self.multi_shot_counter = 0
                 self.multi_shot_angle = 0
                 print("Time over!")
                 self.fire_projectile()
-            else:
-                # 2단계 게이지: 상하 이동
+
+            # (수정) AI가 아닐 때만 게이지 이동
+            if not self.current_player.is_ai:
                 self.gauge_2_value += self.gauge_2_speed * self.gauge_2_direction
                 
-                # 게이지 값이 0~200 사이를 벗어나지 않게
                 if self.gauge_2_value <= 0 or self.gauge_2_value >= self.gauge_2_height:
                     self.gauge_2_direction *= -1
-                    # 경계값 보정
                     self.gauge_2_value = max(0, min(self.gauge_2_value, self.gauge_2_height))
 
         elif self.game_state == "FIRE":
             if len(self.projectiles) == 0:
-                # 1. 쏠 발사 횟수가 1발보다 많이 남았는지 확인
                 if self.multi_shot_counter > 1:
                     print(f"연속 발사: {self.multi_shot_counter - 1}발 남음")
                     self.multi_shot_counter -= 1
-                    # (딜레이를 살짝 주려면 여기에 타이머를 추가할 수 있음)
                     self.fire_single_projectile(self.multi_shot_angle)
                 
-                # 2. 쏠 발사 횟수가 1발(이거나 0발)이면 턴 종료
                 else:
-                    self.multi_shot_counter = 0 # 카운터 초기화
-                    self.next_turn() # 턴 넘기기
+                    self.multi_shot_counter = 0 
+                    self.next_turn() 
 
         # 공통 업데이트
         self.players.update(self.terrain)
 
         new_projectiles_list = []
         for proj in self.projectiles:
-            # update가 새 발사체 리스트를 반환할 수 있음 (Green 스킬)
             new_projs = proj.update(self.terrain, self.players) 
             if new_projs:
                 new_projectiles_list.extend(new_projs)
         
-        # (루프가 끝난 후) 새로 생성된 발사체들을 메인 그룹에 추가
         if new_projectiles_list:
             self.projectiles.add(new_projectiles_list)
         
@@ -615,7 +681,7 @@ class Game:
         for player in self.player_list:
             if player.rect.top > SCREEN_HEIGHT:
                 self.game_state = "GAMEOVER"
-                self.winner = self.player_list[1 - self.player_list.index(player)] # 상대방이 승리
+                self.winner = self.player_list[1 - self.player_list.index(player)] 
                 print(f"{self.winner.color} 승리!")
 
     def fire_projectile(self):
@@ -659,7 +725,13 @@ class Game:
         self.current_player = self.player_list[self.turn_index]
         self.game_state = "MOVE"
         self.state_timer = pygame.time.get_ticks() # 5초 이동 타이머 시작
+
+        # (추가) 새로 온 턴이 AI 턴이라면, AI 타이머 리셋
+        if self.current_player.is_ai:
+            self.ai_timer = pygame.time.get_ticks()
+            
         print(f"플레이어 {self.turn_index + 1} 턴 시작")
+
 
     # 화면에 출력되는 함수
     def draw(self):
@@ -760,20 +832,31 @@ def character_selection_screen(screen, clock):
     preview_size1 = (200, 200) # 선택창에 보여줄 이미지 크기 (조절 가능)
     preview_size2 = (120, 120) # 선택창에 보여줄 이미지 크기 (조절 가능)
     preview_size3 = (200, 200) # 선택창에 보여줄 이미지 크기 (조절 가능)
+    
+    # (수정) 4번 CPU 이미지 (파란색 재활용)
     char_images = {
         1: pygame.transform.scale(p1_img, preview_size1),
         2: pygame.transform.scale(p2_img, preview_size2),
-        3: pygame.transform.scale(p3_img, preview_size3)
+        3: pygame.transform.scale(p3_img, preview_size3),
+        4: pygame.transform.scale(p2_img, preview_size2) 
     }
     
-    font_large = pygame.font.SysFont(None, 72)
-    font_small = pygame.font.SysFont(None, 48)
+    # 폰트 로딩 방식을 SysFont로 되돌립니다
+    try:
+        font_large = pygame.font.SysFont(None, 72)
+        font_small = pygame.font.SysFont(None, 48)
+    except Exception as e:
+        print(f"폰트 로드 실패! {e}")
+        # (SysFont는 거의 항상 성공하므로 이 코드는 예방용입니다)
+        pygame.quit()
+        sys.exit()
+    # ---------------------------------------------------
     
     p1_choice = 1 # 1: Red, 2: Blue, 3: Green
-    p2_choice = 2
+    p2_choice = 4
     
-    char_names = {1: "RED (Kim apple)", 2: "BLUE (Ban hana)", 3: "GREEN (Lee Melon)"}
-    char_colors = {1: RED, 2: BLUE, 3: GREEN}
+    char_names = {1: "RED (Kim apple)", 2: "BLUE (Ban hana)", 3: "GREEN (Lee Melon)", 4: "CPU (Computer)"}
+    char_colors = {1: RED, 2: BLUE, 3: GREEN, 4: (200, 200, 200)}
 
     while True:
         for event in pygame.event.get():
@@ -788,13 +871,19 @@ def character_selection_screen(screen, clock):
                 
                 # P2 선택 (왼쪽, 오른쪽 화살표)
                 if event.key == pygame.K_LEFT:
-                    p2_choice = (p2_choice - 2) % 3 + 1
+                    p2_choice = (p2_choice - 2) % 4 + 1 
                 if event.key == pygame.K_RIGHT:
-                    p2_choice = (p2_choice % 3) + 1
+                    p2_choice = (p2_choice % 4) + 1 
                 
-                # 게임 시작 (Enter 또는 스페이스)
                 if event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
-                    return (p1_choice, p2_choice)
+                    p2_is_ai = (p2_choice == 4)
+                    
+                    if p2_is_ai:
+                        p2_char_type = random.randint(1, 3) 
+                    else:
+                        p2_char_type = p2_choice
+                        
+                    return (p1_choice, p2_char_type, p2_is_ai)
 
         # 배경 이미지 그리기
         if main_background_image:
@@ -802,6 +891,7 @@ def character_selection_screen(screen, clock):
         else:
             screen.fill(GRAY)
         
+        # (타이틀 주석 처리)
         # title_text = font_large.render("CHOOSE YOUR CHARACTER", True, WHITE)
         # screen.blit(title_text, (SCREEN_WIDTH // 2 - title_text.get_width() // 2, 100))
         
@@ -812,25 +902,14 @@ def character_selection_screen(screen, clock):
         p1_controls = font_small.render("(A, D to change)", True, BLACK)
 
         # 2. 반투명 박스 계산
-        # (텍스트와 이미지 중 가장 넓은 것을 기준으로)
-        box_width = max(p1_title.get_width(), 
-                        p1_preview_image.get_width(), 
-                        p1_name.get_width(), 
-                        p1_controls.get_width()) + 40
-        
-        # (Y좌표를 기준으로 높이 계산)
-        top_y = 250  # P1 Title Y
-        bottom_y = 500 + p1_controls.get_height() # Controls Y + Controls Height
-        
-        padding = 20 # 상/하 여백
+        box_width = max(p1_title.get_width(), p1_preview_image.get_width(), p1_name.get_width(), p1_controls.get_width()) + 40
+        top_y = 250
+        bottom_y = 500 + p1_controls.get_height()
+        padding = 20
         box_y = top_y - padding
-        box_height = (bottom_y + padding) - box_y # (수정) 실제 콘텐츠 높이에 맞춤
-
-        # 반투명 표면 생성 (SRCALPHA가 중요)
+        box_height = (bottom_y + padding) - box_y
         transparent_surface = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
-        pygame.draw.rect(transparent_surface, (0, 0, 0, 150), transparent_surface.get_rect(), border_radius=10) # 검정색, 투명도 150
-
-        # 박스 중앙 정렬
+        pygame.draw.rect(transparent_surface, (0, 0, 0, 150), transparent_surface.get_rect(), border_radius=10)
         box_x = SCREEN_WIDTH // 4 - box_width // 2 
         screen.blit(transparent_surface, (box_x, box_y))
 
@@ -842,31 +921,20 @@ def character_selection_screen(screen, clock):
 
 
         # 1. P2 정보 미리 정의 (텍스트, 이미지)
-        p2_title = font_small.render("PLAYER 2", True, char_colors[p2_choice])
+        p2_title = font_small.render("PLAYER 2" if p2_choice != 4 else "CPU", True, char_colors[p2_choice]) # [!!!] (수정) P2 또는 CPU
         p2_preview_image = char_images[p2_choice]
         p2_name = font_small.render(char_names[p2_choice], True, WHITE)
         p2_controls = font_small.render("(<- , -> to change)", True, BLACK)
 
         # 2. 반투명 박스 계산
-        # (텍스트와 이미지 중 가장 넓은 것을 기준으로)
-        box_width_p2 = max(p2_title.get_width(), 
-                           p2_preview_image.get_width(), 
-                           p2_name.get_width(), 
-                           p2_controls.get_width()) + 40
-        
-        # (Y좌표를 기준으로 높이 계산)
-        top_y_p2 = 250  # P2 Title Y
-        bottom_y_p2 = 500 + p2_controls.get_height() # Controls Y + Controls Height
-        
-        padding_p2 = 20 # 상/하 여백
+        box_width_p2 = max(p2_title.get_width(), p2_preview_image.get_width(), p2_name.get_width(), p2_controls.get_width()) + 40
+        top_y_p2 = 250
+        bottom_y_p2 = 500 + p2_controls.get_height()
+        padding_p2 = 20
         box_y_p2 = top_y_p2 - padding_p2
         box_height_p2 = (bottom_y_p2 + padding_p2) - box_y_p2
-
-        # 반투명 표면 생성
         transparent_surface_p2 = pygame.Surface((box_width_p2, box_height_p2), pygame.SRCALPHA)
-        pygame.draw.rect(transparent_surface_p2, (0, 0, 0, 150), transparent_surface_p2.get_rect(), border_radius=10) # 검정색, 투명도 150
-
-        # 박스 중앙 정렬 (P2 위치 기준)
+        pygame.draw.rect(transparent_surface_p2, (0, 0, 0, 150), transparent_surface_p2.get_rect(), border_radius=10)
         box_x_p2 = (SCREEN_WIDTH * 3 // 4) - box_width_p2 // 2 
         screen.blit(transparent_surface_p2, (box_x_p2, box_y_p2))
 
@@ -876,21 +944,15 @@ def character_selection_screen(screen, clock):
         screen.blit(p2_name, (SCREEN_WIDTH * 3 // 4 - p2_name.get_width() // 2, 450))
         screen.blit(p2_controls, (SCREEN_WIDTH * 3 // 4 - p2_controls.get_width() // 2, 500))
 
-
         # 시작 안내
         start_text = font_small.render("Press ENTER to Start", True, YELLOW)
-        
-        # 시작 안내 텍스트에도 반투명 박스 추가
         start_box_width = start_text.get_width() + 40
         start_box_height = start_text.get_height() + 20
         start_box_x = SCREEN_WIDTH // 2 - start_box_width // 2
         start_box_y = (SCREEN_HEIGHT - 100) - 10
-        
         transparent_surface_start = pygame.Surface((start_box_width, start_box_height), pygame.SRCALPHA)
         pygame.draw.rect(transparent_surface_start, (0, 0, 0, 150), transparent_surface_start.get_rect(), border_radius=10)
         screen.blit(transparent_surface_start, (start_box_x, start_box_y))
-        
-        # 시작 안내 텍스트 그리기
         screen.blit(start_text, (SCREEN_WIDTH // 2 - start_text.get_width() // 2, SCREEN_HEIGHT - 100))
 
         pygame.display.flip()
@@ -910,11 +972,12 @@ def main():
         if choices == 'QUIT':
             break
         
-        p1_type, p2_type = choices
+        # ai 컴퓨터 선택에 추가함
+        p1_type, p2_type, p2_is_ai = choices
         
         # 2. 게임 시작 (선택된 캐릭터로)
-        game = Game(screen, p1_type, p2_type)
-        game_status = game.run() # 게임 한 판 실행
+        game = Game(screen, p1_type, p2_type, p2_is_ai) 
+        game_status = game.run()
 
         if game_status == 'QUIT':
             break # 전체 게임 종료
